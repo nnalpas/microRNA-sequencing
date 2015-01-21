@@ -1,0 +1,65 @@
+###################################
+###################################
+##                               ##
+##  Method 3: miRdeep* software  ##
+##                               ##
+###################################
+###################################
+
+#############################################
+# Analysis of miRNA-seq data using miRdeep* #
+#############################################
+
+# Required software is miRdeep*, consult manual/tutorial for details: http://www.australianprostatecentre.org/research/software/mirdeep-star
+
+# Create and enter the Index reference genome directory
+mkdir -p $HOME/Software/miRdeep-star/build_bwt_idx_v31/genome/btau3.1 /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/miRdeep-star $HOME/Software/miRdeep-star/MDS_command_line/genome/btau3.1
+cd $HOME/Software/miRdeep-star/build_bwt_idx_v31/
+
+# Create link to reference genome and index these using miRdeep-star software
+for file in `ls /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/source_file/bt*.fa`; do outfile=`basename $file | perl -p -e 's/^.*_(.*?.fa)$/$1/'`; ln -s $file $HOME/Software/miRdeep-star/build_bwt_idx_v31/genome/btau3.1/$outfile; done;
+nohup java -jar -Xmx32g build_bwt_idx.jar btau3.1 &
+
+# Move the indexed files into the genome folder and create a link towards miRdeep-star software folder
+for file in `ls $HOME/Software/miRdeep-star/build_bwt_idx_v31/genome/btau3.1/*.idx`; do mv $file /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/miRdeep-star/`basename $file`; done;
+for file in `ls /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/miRdeep-star/*.idx`; do ln -s $file $HOME/Software/miRdeep-star/MDS_command_line/genome/btau3.1/`basename $file`; done;
+rm -f $HOME/Software/miRdeep-star/build_bwt_idx_v31/genome/btau3.1/*.idx $HOME/Software/miRdeep-star/build_bwt_idx_v31/genome/btau3.1/*_tmp
+
+# Create and enter the miRdeep* software directory that will contain the miRBase data
+mkdir -p $HOME/Software/miRdeep-star/MDS_command_line/genome/btau3.1/miRBase/
+cd !$
+
+# Create symbolic link to miRBase data files in the created folder of miRdeep* software
+ln -s /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_miRNA.gff3 ./knownMiR.gff3
+ln -s /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/mature-miRNA.fa ./mature.fa
+ln -s /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/pre-miRNA.fa ./hairpin.fa
+
+# Create and enter the miRdeep* working directory
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/miRdeep-star/
+cd !$
+
+# Create symbolic link to the miRNA fastq files into the miRdeep-star directory
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/*_trim.fastq`; do outfile=`basename $file | perl -p -e 's/_trim.fastq//'`; mkdir -p $HOME/scratch/miRNAseqTimeCourse/miRdeep-star/$outfile; ln -s $file $HOME/scratch/miRNAseqTimeCourse/miRdeep-star/$outfile/${outfile}_trim.fastq; done;
+
+# Create shell script to process and quantify reads using miRdeep*
+cd $HOME/Software/miRdeep-star/MDS_command_line/
+for file in `find $HOME/scratch/miRNAseqTimeCourse/miRdeep-star/ -name *_trim.fastq`; do echo "java -jar -Xmx32g MD.jar -g btau3.1 -t 17 -l 28 -p 20 -m 100 -r 1 $file" >> miRdeep-star_run.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 7 miRdeep-star_run.sh miRdeep-star_run.sh.
+for script in `ls miRdeep-star_run.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Clean the miRdeep* software directory (delete all unrequired files)
+for file in `ls $HOME/Software/miRdeep-star/MDS_command_line/miRdeep-star_run.sh*`; do mv $file $HOME/scratch/miRNAseqTimeCourse/miRdeep-star/`basename $file`; done;
+
+# Collect all read counts files for transfer on desktop computer
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Counts/miRdeep-star/
+cd !$
+for file in `find $HOME/scratch/miRNAseqTimeCourse/miRdeep-star/ -name *_trim.known_miR.result`; do outfile=`basename $file | perl -p -e 's/^(.*?)_trim.known_miR.(result)$/$1_$2.txt/'`; cp $file $HOME/scratch/miRNAseqTimeCourse/Counts/miRdeep-star/$outfile; done;
+
+# Perform subsequent miRNA analyses in R, follow R pipelines
+

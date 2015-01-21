@@ -1,0 +1,84 @@
+###################################
+###################################
+##                               ##
+##  Method 2: miRdeep2 software  ##
+##                               ##
+###################################
+###################################
+
+#############################################
+# Analysis of miRNA-seq data using miRdeep2 #
+#############################################
+
+# Required software is miRdeep2, consult manual/tutorial for details: https://www.mdc-berlin.de/36105849/en/research/research_teams/systems_biology_of_gene_regulatory_elements/projects/miRDeep/documentation
+
+# Create and enter the Index reference genome directory
+mkdir -p /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/bowtie1.1.0
+cd !$
+
+# Index the reference genome UMD3.1 using Bowtie
+nohup bowtie-build /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/source_file/Btau_UMD3.1_multi.fa Btau_UMD3.1_multi &
+
+# Create and enter the miRdeep2 directory for mapping work
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mapper
+cd !$
+
+# Create a shell script to process and map reads them to the genome
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/*_trim.fastq`; do ln -s $file $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mapper/`basename $file`; done;
+for file in `ls *_trim.fastq`; do outfile=`basename $file | perl -p -e 's/_trim\.fastq//'`; echo "mapper.pl $file -e -h -m -p /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/bowtie1.1.0/Btau_UMD3.1_multi -s ${outfile}_collapsed.fa -t ${outfile}.arf -v" >> mapper.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 7 mapper.sh mapper.sh.
+for script in `ls mapper.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Create and enter the miRdeep2 directory for quantifying work
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/mirdeep2/quantifier
+cd !$
+
+# Create a shell script to fast quantitate the mapped reads to known miRNA
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mapper/*_collapsed.fa`; do outfile=`basename $file | perl -p -e 's/_collapsed.fa//'`; echo "mkdir -p $HOME/scratch/miRNAseqTimeCourse/mirdeep2/quantifier/$outfile; cd $HOME/scratch/miRNAseqTimeCourse/mirdeep2/quantifier/$outfile; quantifier.pl -p /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_pre-miRNA.fa -m /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_mature-miRNA.fa -r $file -t bta" >> quantifier.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 7 quantifier.sh quantifier.sh.
+for script in `ls quantifier.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Create and enter the miRdeep2 directory for miRdeep discovery work
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep
+cd !$
+
+# Copy and modify the required fasta files since miRdeep2 software requires no space in headers
+cp /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/source_file/Btau_UMD3.1_multi.fa ./Btau_UMD3.1_multi.fa
+cp /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_mature-miRNA.fa ./Btau_mature-miRNA.fa
+cp /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Other_mature-miRNA.fa ./Other_mature-miRNA.fa
+cp /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_pre-miRNA.fa ./Btau_pre-miRNA.fa
+perl -p -i -e 's/^(>.*?)\s.*$/$1/' $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_UMD3.1_multi.fa
+perl -p -i -e 's/^(>.*?) (.*?) .*$/$1_$2/' $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_mature-miRNA.fa
+perl -p -i -e 's/^(>.*?) (.*?) .*$/$1_$2/' $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Other_mature-miRNA.fa
+perl -p -i -e 's/^(>.*?) (.*?) .*$/$1_$2/' $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_pre-miRNA.fa
+
+# Create a shell script for identification and quantification of known and novel miRNAs
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mapper/*_collapsed.fa`; do outfile=`basename $file | perl -p -e 's/_collapsed.fa//'`; echo "mkdir -p $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/$outfile; cd $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/$outfile; miRDeep2.pl $file $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_UMD3.1_multi.fa $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mapper/${outfile}.arf $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_mature-miRNA.fa $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Other_mature-miRNA.fa $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_pre-miRNA.fa -t Cow" >> miRdeep2.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 7 miRdeep2.sh miRdeep2.sh.
+for script in `ls miRdeep2.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Collect all read counts files for transfer on desktop computer
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Counts/mirdeep2/ 
+cd !$
+for file in `find $HOME/scratch/miRNAseqTimeCourse/mirdeep2/quantifier -name miRNAs_expressed_all_samples*`; do outfile=`echo $file | perl -p -e 's/^.*quantifier\/(.*)\/.*$/$1/'`; cp $file $HOME/scratch/miRNAseqTimeCourse/Counts/mirdeep2/${outfile}_expressed.csv; done;
+
+# Perform subsequent miRNA analyses in R, follow R pipelines
+

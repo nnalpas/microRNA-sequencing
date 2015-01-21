@@ -1,0 +1,191 @@
+#####################################################
+#####################################################
+##                                                 ##
+##  Serum miRNA-seq: Full Bioinformatics Pipeline  ##
+##                                                 ##
+#####################################################
+#####################################################
+
+####################################
+# Download miRNA-seq data from MSU #
+####################################
+
+# Create and enter the data storage directory
+mkdir $HOME/storage/miRNAseqTimeCourse
+cd !$
+
+# Download data on MSU servers (bioinfo-2 and titan) into Stampede server
+nohup wget -r ftp://machughd:d4EQAwre@bioinfo-2.bch.msu.edu &
+nohup wget -r ftp://machughd:d4EQAwre@titan.bch.msu.edu &
+
+# Once finished downloading, clean up the folder
+for folder in `ls $HOME/storage/miRNAseqTimeCourse/bioinfo-2.bch.msu.edu/`; do mv $HOME/storage/miRNAseqTimeCourse/bioinfo-2.bch.msu.edu/${folder} $HOME/storage/miRNAseqTimeCourse/${folder}; done;
+for folder in `ls $HOME/storage/miRNAseqTimeCourse/titan.bch.msu.edu/`; do mv $HOME/storage/miRNAseqTimeCourse/titan.bch.msu.edu/${folder} $HOME/storage/miRNAseqTimeCourse/${folder}; done;
+rmdir $HOME/storage/miRNAseqTimeCourse/bioinfo-2.bch.msu.edu/ $HOME/storage/miRNAseqTimeCourse/titan.bch.msu.edu
+
+# The whole fastq_sequence directory can be changed to read and execute only, all write permission for everyone are removed
+chmod -R 555 $HOME/storage/miRNAseqTimeCourse
+
+
+##################
+# File check sum #
+##################
+
+# Create and enter the md5sum output directory
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/md5check
+cd !$
+
+# Create shell script to check the md5sum on raw data fastq files
+for file in `find $HOME/storage/miRNAseqTimeCourse -name md5.txt`; do echo "cd `dirname $file` && md5sum -c `basename $file` >> $HOME/scratch/miRNAseqTimeCourse/md5check/md5_UCD.txt" >> md5sum.sh; done;
+
+# Run script on Stampede
+chmod 755 ./md5sum.sh
+nohup ./md5sum.sh &
+
+
+####################################
+# Quality check of raw fastq files #
+####################################
+
+# Required software is FastQC, consult manual/tutorial for details: http://www.bioinformatics.babraham.ac.uk/projects/fastqc/
+
+# Create and enter the quality check output directory
+for run in `ls $HOME/storage/miRNAseqTimeCourse/`; do mkdir -p $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/$run; done;
+cd $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/
+
+# Create shell script to perform FastQC quality check on your fastq files
+for file in `find $HOME/storage/miRNAseqTimeCourse/ -name *fastq.gz`; do outfolder=`dirname $file | perl -p -e 's/^.*(2014.*)/$1/'`; echo "fastqc --nogroup -t 1 -o $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/$outfolder $file" >> fastqc.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 46 fastqc.sh fastqc.sh.
+for script in `ls fastqc.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Combine and check all output from FastQC
+for file in `find $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/ -name summary.txt`; do grep -oP -m 1 "6.*\.fastq.gz" $file | perl -p -e 's/^(\d{4}_.*)_\w{6}_.*/$1/' >> $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/filename.txt; echo $file | grep -oP "pre_filtering\/\d{8}" | perl -p -e 's/^pre_filtering\/(\d{8})/$1/' >> $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/rundate.txt; cut -f1 $file | tr '\n' '\t' | perl -p -e 's/$/\n/' >> $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/fastqcrun.txt; paste filename.txt rundate.txt fastqcrun.txt > $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/fastqc.txt; done;
+echo -e "Sample\tSequencing run date\tBasic Statistics\tPer base sequence quality\tPer sequence quality scores\tPer base sequence content\tPer base GC content\tPer sequence GC content\tPer base N content\tSequence Length Distribution\tSequence Duplication Levels\tOverrepresented sequences\tKmer Content" | cat - $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/fastqc.txt > $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/fastqc_stats.txt
+rm -f filename.txt rundate.txt fastqcrun.txt fastqc.txt
+
+# If the FastQC folder are compressed, remove the uncompressed folder
+for file in `find $HOME/scratch/miRNAseqTimeCourse/quality_check/pre_filtering/ -name *_fastqc`; do rm -rf $file; done;
+
+
+#############################################
+# Trimming of adapter sequence within reads #
+#############################################
+
+# Required software is cutadapt, consult manual/tutorial for details: https://cutadapt.readthedocs.org/en/latest/guide.html
+
+# Create and enter the adapter filtering output directory
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/
+cd !$
+
+# Create shell script to trim adapter sequence with Cutadapt on your fastq files
+for file in `find $HOME/storage/miRNAseqTimeCourse/ -name *fastq.gz`; do outfile=`basename $file | perl -p -e 's/^(\d{4}_.*)_\w{6}_.*/$1/'`; animal=`echo $outfile | perl -p -e 's/(\d{4}).*/$1/'`; echo "cutadapt -a TGGAATTCTCGGGTGCCAAGG -O 10 --match-read-wildcards --discard-untrimmed -m 17 $file >> $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/${outfile}_trim.fastq" >> cutadapt_${animal}.sh; done;
+
+# Run all scripts on Stampede
+for script in `ls cutadapt*.sh`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Generate a master file containing cutadapt trimming stats results
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/cutadapt*.sh.nohup`; do grep -oP "6\d+.*\.fastq.gz" $file | perl -p -e 's/^(\d{4}_.*)_\w{6}_.*/$1/' >> $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/filename.txt; grep -oP "\d{8}_miRNASeq" $file | perl -p -e 's/^(\d{8})_miRNASeq/$1/' >> $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/rundate.txt; grep "Processed reads\:" $file | perl -p -e 's/\s*\w*\s\w*\:\s*(\d*)\s*/$1\n/' >> $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/processed.txt; grep "Trimmed reads\:" $file | perl -p -e 's/\s*\w*\s\w*\:\s*(\d*)\s*.(\d*\.\d*).*\s*/$1\t$2\n/' >> $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/trimmed.txt; grep "Too short reads\:" $file | perl -p -e 's/\s*\w*\s*\w*\s\w*\:\s*(\d*)\s*.(\d*\.\d*).*\s*/$1\t$2\n/' >> $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/short.txt; paste filename.txt rundate.txt processed.txt trimmed.txt short.txt > $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/trimmed_stats.txt; done;
+echo -e "Sample\tSequencing run date\tProcessed reads\tTrimmed reads\tPercentage trimmed reads\tToo short reads\tPercentage too short reads" | cat - $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/trimmed_stats.txt > $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/trimming_stats.txt
+rm -f filename.txt rundate.txt processed.txt trimmed.txt short.txt trimmed_stats.txt
+
+
+###################################################
+# Quality check of trimmed individual fastq files #
+###################################################
+
+# Required software is FastQC, consult manual/tutorial for details: http://www.bioinformatics.babraham.ac.uk/projects/fastqc/
+
+# Create and enter the quality check output directory
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering
+cd !$
+
+# Create shell script to perform FastQC quality check on your fastq files
+for file in `find $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/ -name *_trim.fastq`; do echo "fastqc --nogroup -t 1 -o $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering $file" >> fastqc_filt.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 7 fastqc_filt.sh fastqc_filt.sh.
+for script in `ls fastqc_filt.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Combine and check all output from FastQC
+for file in `find $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering/ -name summary.txt`; do grep -oP -m 1 "6.*\_trim.fastq" $file | perl -p -e 's/^(\d{4}_.*)_trim.fastq/$1/' >> $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering/filename.txt; cut -f1 $file | tr '\n' '\t' | perl -p -e 's/$/\n/' >> $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering/fastqcrun.txt; paste filename.txt fastqcrun.txt > $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering/fastqc.txt; done;
+echo -e "Sample\tBasic Statistics\tPer base sequence quality\tPer sequence quality scores\tPer base sequence content\tPer base GC content\tPer sequence GC content\tPer base N content\tSequence Length Distribution\tSequence Duplication Levels\tOverrepresented sequences\tKmer Content" | cat - $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering/fastqc.txt > $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering/fastqc_stats.txt
+rm -f filename.txt fastqcrun.txt fastqc.txt
+
+# If the FastQC folder are compressed, remove the uncompressed folder
+for file in `find $HOME/scratch/miRNAseqTimeCourse/quality_check/post_filtering/ -name '*_fastqc'`; do rm -rf $file; done;
+
+
+#######################################
+# Reference genome UMD3.1 preparation #
+#######################################
+
+# Create and enter the reference genome directory
+mkdir -p /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/source_file
+cd !$
+
+# Download the reference genome UMD3.1 from NCBI into Stampede
+nohup wget -r -nd "ftp://ftp.ncbi.nlm.nih.gov/genomes/Bos_taurus/Assembled_chromosomes/seq/bt_ref_Bos_taurus_UMD_3.1_*.fa.gz" &
+
+# Uncompress the reference genome UMD3.1 from NCBI
+gunzip -c bt_ref_Bos_taurus_UMD_3.1_*.fa.gz > Btau_UMD3.1_multi.fa
+gunzip bt_ref_Bos_taurus_UMD_3.1_*.fa.gz
+
+# Modify headers in the reference genome UMD3.1 from NCBI
+for file in `ls *.fa`; do perl -p -i -e 's/^>(.*)(Bos taurus breed Hereford chromosome )(.{1,2})(\,.*)$/>chr$3 $1$2$3$4/' $file; done;
+for file in `ls *.fa`; do perl -p -i -e 's/^>(.*)(Bos taurus mitochondrion)(\,.*)$/>chrMT $1$2$3/' $file; done;
+
+# Create and enter the reference gene annotation directory
+mkdir -p /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file
+cd !$
+
+# Download the various miRNA annotation files from miRBase (based on reference genome UMD3.1 from NCBI)
+wget --output-document ./Btau_miRNA.gff3 ftp://mirbase.org/pub/mirbase/CURRENT/genomes/bta.gff3
+wget --output-document ./pre-miRNA.fa.gz ftp://mirbase.org/pub/mirbase/CURRENT/hairpin.fa.gz
+wget --output-document ./mature-miRNA.fa.gz ftp://mirbase.org/pub/mirbase/CURRENT/mature.fa.gz
+
+# Uncompress the miRNA annotation files from miRBase
+for file in `ls /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/*.gz`; do gzip -d $file; done;
+
+# Convert the gff file from miRBase to gtf format
+perl $HOME/SVN/gff2gtf.pl -i /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_miRNA.gff3 -o /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_miRNA.gtf
+grep -P "\tpre-miRNA\t" Btau_miRNA.gtf >> Btau_pre-miRNA.gtf
+grep -P "\tmiRNA\t" Btau_miRNA.gtf >> Btau_mature-miRNA.gtf
+
+# Obtain all miRNA information from the various miRNA annotation files obtained from miRBase
+perl ~/Scripts/miRNA_info_grepping.pl -fasta /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/mature-miRNA.fa -gff /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_miRNA.gff3 -output miRNA_Btaurus.txt
+
+# Create the mature miRNA fasta file for Bos taurus
+perl ~/SVN/Fasta_keep_value.pl -fasta /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/mature-miRNA.fa -keep Bos -output Btau_mature-miRNA.fa
+
+# Create the mature miRNA fasta file for other species
+perl ~/SVN/Fasta_ignore_value.pl -fasta /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/mature-miRNA.fa -ignore Bos -output Other_mature-miRNA.fa
+
+# Create the precursor miRNAs fasta file for Bos taurus
+perl ~/SVN/Fasta_keep_value.pl -fasta /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/pre-miRNA.fa -keep Bos -output Btau_pre-miRNA.fa
+
+
+######################
+# Following analyses #
+######################
+
+# Continue pipeline to generate counts per miRNA via three different methods, consult the appropriate pipelines
+
+# Use Method 1: Novoalign-featureCounts softwares, see pipeline "Novoalign-featureCounts.txt"
+
+# Use Method 2: miRdeep2 software, see pipeline "miRdeep2.txt"
+
+# Use Method 3: miRdeep* software, see pipeline "miRdeep-star.txt"
