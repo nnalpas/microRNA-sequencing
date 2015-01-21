@@ -24,3 +24,6 @@ or
 
 MacHugh, D.E.
 david.machugh@ucd.ie
+
+
+DOI badge: https://zenodo.org/badge/doi/10.5281/zenodo.14133.svg
