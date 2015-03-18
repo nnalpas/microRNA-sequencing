@@ -63,3 +63,17 @@ for file in `find $HOME/scratch/miRNAseqTimeCourse/miRdeep-star/ -name *_trim.kn
 
 # Perform subsequent miRNA analyses in R, follow R pipelines
 
+
+##################################
+# Clean up the working directory #
+##################################
+
+# Compress all large file
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/*.fastq`; do echo "gzip -9 $file" >> compress.sh; done;
+chmod 755 compress.sh
+nohup ./compress.sh &
+
+# Remove unnecessary files
+for file in `find . -name "*nohup*"`; do rm -f $file; done;
+for file in `find . -name "*.sh.*"`; do rm -f $file; done;
+
