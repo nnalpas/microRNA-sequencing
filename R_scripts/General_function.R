@@ -179,19 +179,16 @@ DEtable.merge <- function(..., output, pattern) {
     tomerge <- eval(parse(text = var[i]))$table
     if (i == 1) {
       data <- tomerge[,]
-      colnames(data)[(ncol(data) - 4):ncol(data)] <- c(gsub(
-        pattern = "$", replacement = suffix[i], x = colnames(data)[(
-          ncol(data) - 4):ncol(data)], perl = TRUE))
     }
     else {
       data <- merge(x = data, y = tomerge[, (ncol(tomerge) - 4):ncol(tomerge)],
                     by = "row.names")
       rownames(data) <- data[, "Row.names"]
       data <- data[, -1]
-      colnames(data)[(ncol(data) - 4):ncol(data)] <- c(gsub(
-        pattern = "$", replacement = suffix[i], x = colnames(data)[(
-          ncol(data) - 4):ncol(data)], perl = TRUE))
     }
+    colnames(data)[(ncol(data) - 4):ncol(data)] <- c(gsub(
+      pattern = "$", replacement = suffix[i], x = colnames(data)[(
+        ncol(data) - 4):ncol(data)], perl = TRUE))
   }
   data <- cbind(rownames(data), data)
   colnames(data)[1] <- "gene_id"
@@ -233,8 +230,8 @@ DESeq.merge <- function(..., output, pattern) {
 ####################################################
 
 # Create a function to perform differential expression of genes using edgeR
-multi.DE <- function(..., data, design, group, adjpvalue, method, lrtdata, dedata,
-                   smearfile) {
+multi.DE <- function(..., data, design, group, adjpvalue, method,
+                     lrtdata = NULL, dedata = NULL, smearfile = NULL) {
   comparison <- matrix(data = unlist(list(...)), ncol = 2, byrow = TRUE)
   contr <- rep(x = 0, times = length(colnames(design)))
   for (i in 1:length(comparison[, 1])) {
@@ -267,14 +264,20 @@ multi.DE <- function(..., data, design, group, adjpvalue, method, lrtdata, dedat
   print(names(de))
   print("Heading of the edgeR multiple correction test table:")
   print(head(de$table))
-  png(filename = paste(smearfile, "png", sep="."), width = 1366, height = 768,
-      units = "px")
-  plotSmear(object = lrt, de.tags = (rownames(lrt$table)[as.logical(
-    decideTestsDGE(object = lrt, p.value = 0.05, adjust.method = "BH"))]))
-  abline(h = c(-0.5, 0.5), col = "blue")
-  dev.off()
-  assign(x = lrtdata, value = lrt, envir = .GlobalEnv)
-  assign(x = dedata, value = de, envir = .GlobalEnv)
+  if (!is.null(smearfile)) {
+    png(filename = paste(smearfile, "png", sep="."), width = 1366,
+        height = 768, units = "px")
+    plotSmear(object = lrt, de.tags = (rownames(lrt$table)[as.logical(
+      decideTestsDGE(object = lrt, p.value = 0.05, adjust.method = "BH"))]))
+    abline(h = c(-0.5, 0.5), col = "blue")
+    dev.off()
+  }
+  if (!is.null(lrtdata)) {
+    assign(x = lrtdata, value = lrt, envir = .GlobalEnv)
+  }
+  if (!is.null(dedata)) {
+    assign(x = dedata, value = de, envir = .GlobalEnv)
+  }
 }
 
 ################################################
@@ -295,7 +298,7 @@ g.legend <- function(a.gplot) {
 # Function to create MDS plot from data subset #
 ################################################
 
-# Version in development
+# Define the function to plot MDS
 multi.MDS <- function(pattern = NULL, data, target, prefix = NULL,
                       suffix = NULL, plotmds = list(), aes.colour, size = 3,
                       manual.colour = NULL, fill = "grey", legend = list(),
@@ -461,6 +464,170 @@ multi.MDS <- function(pattern = NULL, data, target, prefix = NULL,
     dev.off()
   }
 print("It looks like a successfull run!")
+}
+
+#####################################
+# Function to plot the number of DE #
+#####################################
+
+# Define the dataframe that will contain the number of genes info
+plot.numb.DE <- function(data, comparison = NULL, pattern = NULL,
+                         replace = NULL, filename) {
+  if (is.null(comparison)) {
+    Stop("Error: Comparison values are required to select data from variable!")
+  }
+  number.DE <- matrix(nrow = (length(comparison) * 8), ncol = 6)
+  number.DE <- data.frame(number.DE)
+  colnames(number.DE) <- c("time", "expression", "FC_range", "FC_number",
+                           "FDR_range", "FDR_number")
+  if (!is.null(pattern) && !is.null(replace) &&
+        length(pattern == length(replace))) {
+    comp.val <- gsub(pattern = pattern, replacement = replace, x = comparison,
+                     perl = TRUE)
+  }
+  else if (is.null(pattern) && is.null(replace)) {
+    comp.val <- comparison
+  }
+  else {
+    stop("Error: A single pattern and replace values are to be provided both!")
+  }
+  number.DE[, "time"] <- rep(x = comp.val, each = 8)
+  number.DE$time <- factor(number.DE$time, levels = comp.val)
+  number.DE[, "expression"] <- rep(x = c("Upregulated", "Downregulated"),
+                                   each = 4, times = length(comp.val))
+  # Define the matrix containing the range of logFC and Pvalue
+  range.val <- matrix(data = c(seq(from = 0, to = 6, by = 2),
+                               2, 4, 6, Inf,
+                               0.05, 0.01, 0.001, 0.0001,
+                               0.01, 0.001, 0.0001, 0),
+                      nrow = 4, ncol = 4, byrow = FALSE)
+  colnames(range.val) <- c("FCmin", "FCmax", "FDRmin", "FDRmax")
+  rownames(range.val) <- c("low", "mid_low", "mid_high", "high")
+  # Calculate the number of DE gene in each logFC and Pvalue range
+  counter <- 1
+  for (time.val in comparison) {
+    fc.var <- paste("logFC_", time.val, sep = "")
+    fdr.var <- paste("FDR_", time.val, sep = "")
+    for (x in rownames(range.val)) {
+      FCmin <- range.val[x, "FCmin"]
+      FCmax <- range.val[x, "FCmax"]
+      FCmin.invert <- (-1 * FCmin)
+      FCmax.invert <- (-1 * FCmax)
+      FDRmin <- range.val[x, "FDRmin"]
+      FDRmax <- range.val[x, "FDRmax"]
+      number.DE[counter, "FC_range"] <- paste(FCmin, "to", FCmax,
+                                              "- Upregulated", sep = " ")
+      number.DE[(counter + 4), "FC_range"] <- paste(
+        FCmin, "to", FCmax, "- Downregulated", sep = " ")
+      number.DE[counter, "FC_number"] <- length(data[(
+        data[, fc.var] >= FCmin & data[, fc.var] < FCmax & data[
+          , fdr.var] <= 0.05), "gene_id"])
+      number.DE[(counter + 4), "FC_number"] <- length(data[(
+        data[, fc.var] <= FCmin.invert & data[
+          , fc.var] > FCmax.invert & data[, fdr.var] <= 0.05), "gene_id"])
+      number.DE[counter, "FDR_range"] <- paste(FDRmin, "to", FDRmax,
+                                               "- Upregulated", sep = " ")
+      number.DE[(counter + 4), "FDR_range"] <- paste(
+        FDRmin, "to", FDRmax, "- Downregulated", sep = " ")
+      number.DE[counter, "FDR_number"] <- length(data[(
+        data[, fdr.var] <= FDRmin & data[, fdr.var] > FDRmax & data[
+          , fc.var] > 0), "gene_id"])
+      number.DE[(counter + 4), "FDR_number"] <- length(data[(
+        data[, fdr.var] <= FDRmin & data[, fdr.var] > FDRmax & data[
+          , fc.var] < 0), "gene_id"])
+      counter <- counter + 1
+    }
+    counter <- counter + 4
+  }
+  # Define the ranges as factor, define a set of colours and the max y limit
+  FC.breaks <- number.DE$FC_range <- factor(
+    number.DE$FC_range, levels = unique(number.DE$FC_range))
+  FDR.breaks <- number.DE$FDR_range <- factor(
+    number.DE$FDR_range, levels = unique(number.DE$FDR_range))
+  colours <- c("indianred1", "indianred2", "indianred3", "indianred4",
+               "skyblue1", "skyblue2", "skyblue3", "skyblue4")
+  max <- (((max(aggregate(FC_number ~ time + expression, data = number.DE,
+                          FUN = sum)$FC_number) %/% 10) + 1) * 10)
+  # Plot the number of DE gene per range category and time points
+  FC.plot <- ggplot(number.DE, aes(x = time)) + 
+    geom_bar(stat = "identity", subset = .(expression == "Upregulated"),
+             aes(y = FC_number, fill = FC_range)) +
+    geom_bar(stat = "identity", subset = .(expression == "Downregulated"),
+             aes(y = (FC_number*(-1)), fill = FC_range)) +
+    xlab(label = "Comparisons") +
+    ylab(label = "Number of DE genes") +
+    coord_cartesian(ylim = c(-max, max)) +
+    geom_abline(intercept = 0, slope = 0) + 
+    scale_fill_manual(name = "Range of logFC", limits = levels(FC.breaks),
+                      values = colours) +
+    theme(axis.text.x = element_text(angle = -45, vjust = 1, hjust = 0))
+  FDR.plot <- ggplot(number.DE, aes(x = time)) + 
+    geom_bar(stat = "identity", subset = .(expression == "Upregulated"),
+             aes(y = FDR_number, fill = FDR_range)) +
+    geom_bar(stat = "identity", subset = .(expression == "Downregulated"),
+             aes(y = (FDR_number*(-1)), fill = FDR_range)) +
+    xlab(label = "Comparisons") +
+    ylab(label = "Number of DE genes") +
+    coord_cartesian(ylim = c(-max, max)) +
+    geom_abline(intercept = 0, slope = 0) + 
+    scale_fill_manual(name = "Range of FDR", limits = levels(FDR.breaks),
+                      values = colours) +
+    theme(axis.text.x = element_text(angle = -45, vjust = 1, hjust = 0))
+  # Output a figure of the number of DE per time point
+  tiff(filename = filename,
+       width = 7, height = 7, units = "in", res = 600, compression = "lzw")
+  grid.newpage()
+  grid.arrange(FC.plot, FDR.plot, nrow = 2, ncol = 1)
+  dev.off()
+}
+
+###################################################################
+# Function to plot Venn diagram of differentially expressed genes #
+###################################################################
+
+# Define the function to plot Venn diagram
+venn.de <- function(data, comparison = NULL, pattern = NULL,
+                    replace = NULL, picname = NULL, overlapname = NULL, ...) {
+  if (is.null(comparison)) {
+    Stop("Error: Comparison values are required to select data from variable!")
+  }
+  else if (length(comparison) > 5) {
+    Stop("Error: This function cannot handle more than 5 sets comparison!")
+  }
+  if (is.null(picname)) {
+    Stop("Error: Picname value is required to output the venn plot picture!")
+  }
+  if (!is.null(pattern) && !is.null(replace) &&
+        length(pattern == length(replace))) {
+    comp.val <- gsub(pattern = pattern, replacement = replace, x = comparison,
+                     perl = TRUE)
+  }
+  else if (is.null(pattern) && is.null(replace)) {
+    comp.val <- comparison
+  }
+  else {
+    stop("Error: A single pattern and replace values are to be provided both!")
+  }
+  # Identify as a vector list the significant DE genes per time point
+  venn.list <- list()
+  for (i in 1:length(comparison)) {
+    fdr.var <- paste("FDR_", comparison[i], sep = "")
+    venn.list[comp.val[i]] <- list(as.character(
+      data[!is.na(data[, fdr.var]) & (data[, fdr.var] < 0.05), "gene_id"]))
+  }
+  # Define a set of colors
+  colours <- brewer.pal(n = length(comparison), name = "Set1")
+  # Create the Venn diagram of overlapping DE genes between time points
+  venn.diagram(x = venn.list, filename = paste(picname, ".tiff", sep = ""),
+               na = "remove", res = 600, fill = colours,
+               cat.col = colours, ...)
+  if (!is.null(overlapname)) {
+    # Identify and output the DE common to all comparisons
+    overlap <- assign(x = overlapname, value = Reduce(intersect, venn.list),
+                      envir=.GlobalEnv)
+    write.matrix(x = data[overlap,],
+                 file = paste(overlapname, ".txt", sep = ""), sep = "\t")
+  }
 }
 
 #######

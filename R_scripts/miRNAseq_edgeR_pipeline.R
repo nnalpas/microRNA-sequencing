@@ -33,6 +33,7 @@ loadpackage(package = gplots)
 loadpackage(package = RColorBrewer)
 loadpackage(package = magrittr)
 loadpackage(package = gridExtra)
+loadpackage(package = plyr)
 
 #######################################################################
 # Analysis of counts data obtained via different pipelines (pick one) #
@@ -81,21 +82,24 @@ dim(miRNA.info)
                    sep = ""), columns = c(1,7), 
       skip = 1, header = TRUE)
     Count <- data.frame(gene_id = rownames(Count), Count$counts)
-    colnames(Count) <- gsub(pattern = "^X", replacement = "", x = colnames(Count),
-                            perl = TRUE)
+    colnames(Count) <- gsub(pattern = "^X", replacement = "",
+                            x = colnames(Count), perl = TRUE)
   }
   else if (method == "miRdeep2") {
-    files <- list.files(path = paste(user, "/Home_work_sync/Work/TIDA/miRNA-seq",
-                                     "/Results/Counts/mirdeep2", sep = ""),
+    files <- list.files(path = paste(user, "/Home_work_sync/Work/TIDA/",
+                                     "miRNA-seq/Results/Counts/mirdeep2",
+                                     sep = ""),
                         pattern = "6")
     for (i in 1:length(files)) {
-      Dat <- read.table(file = paste(user, "Home_work_sync/Work/TIDA/miRNA-seq",
-                                     "/Results/Counts/mirdeep2", files[i],
-                                     sep = "/"), quote = "")
+      Dat <- read.table(file = paste(user, "Home_work_sync/Work/TIDA/",
+                                     "miRNA-seq/Results/Counts/mirdeep2",
+                                     files[i], sep = "/"), quote = "")
       Dat <- Dat[, c(1:3)]
-      sample <- gsub(pattern = "_expressed.csv", replacement = "", x = files[i])
+      sample <- gsub(pattern = "_expressed.csv", replacement = "",
+                     x = files[i])
       colnames(Dat) <- c("gene_name", sample, "precursor_name")
-      Dat <- merge(x = Dat, y = miRNA.info, by = c("gene_name", "precursor_name"))
+      Dat <- merge(x = Dat, y = miRNA.info, by = c("gene_name",
+                                                   "precursor_name"))
       Dat <- Dat[, c("gene_id", sample)]
       if (i == 1) {
         Count <- Dat
@@ -106,21 +110,23 @@ dim(miRNA.info)
     }
   }
   else if (method == "miRdeepstar") {
-    files <- list.files(path = paste(user, "/Home_work_sync/Work/TIDA/miRNA-seq/",
-                                     "Results/Counts/miRdeep-star", sep = ""),
+    files <- list.files(path = paste(user, "/Home_work_sync/Work/TIDA/",
+                                     "miRNA-seq/Results/Counts/miRdeep-star",
+                                     sep = ""),
                         pattern = "6")
     for (i in 1:length(files)) {
-      Dat <- read.table(file = paste(user, "Home_work_sync/Work/TIDA/miRNA-seq/",
-                                     "Results/Counts/miRdeep-star", files[i],
-                                     sep = "/"), quote = "", sep = "\t",
-                        header = TRUE)
+      Dat <- read.table(file = paste(user, "Home_work_sync/Work/TIDA/",
+                                     "miRNA-seq/Results/Counts/miRdeep-star",
+                                     files[i], sep = "/"),
+                        quote = "", sep = "\t", header = TRUE)
       Dat <- Dat[, c(1,3,4,6,7)]
       sample <- gsub(pattern = "_result.txt", replacement = "", x = files[i])
       colnames(Dat)[1:4] <- c("precursor_name", "chromosome", "strand", sample)
       Dat <- cbind(Dat[,1:4], colsplit(string = as.character(
         Dat[,5]), pattern = "-", names = c("start_position", "end_position")))
       Dat <- merge(x = Dat, y = miRNA.info, by = c(
-        "precursor_name", "chromosome", "strand", "start_position"), all = TRUE)
+        "precursor_name", "chromosome", "strand", "start_position"),
+        all = TRUE)
       Dat <- Dat[, c("gene_id", sample)]
       Dat[is.na(x = Dat)] <- 0
       if (i == 1) {
@@ -336,8 +342,8 @@ multi.MDS(data = dgelist.norm, target = target, prefix = method,
 #################################################
 
 # Use custom function to output a MDS plot per post-infection time points
-multi.MDS(pattern = c("_pre2|_pre1|_1$", "_pre2|_pre1|_2$", "_pre2|_pre1|_6$", "_pre2|_pre1|_10$",
-                      "_pre2|_pre1|_12$"),
+multi.MDS(pattern = c("_pre2|_pre1|_1$", "_pre2|_pre1|_2$", "_pre2|_pre1|_6$",
+                      "_pre2|_pre1|_10$", "_pre2|_pre1|_12$"),
           data = dgelist.norm, target = target, prefix = method,
           suffix = c("W1", "W2", "W6", "W10", "W12"),
           plotmds = list(top = 1000000, gene.selection = "pairwise",
@@ -414,49 +420,43 @@ sqrt(dgelist.disp$common.dispersion)
 dgeglm.fit <- glmFit(y = dgelist.disp, design = design)
 names(dgeglm.fit)
 
-################################
-# Differential expression call #
-################################
+#####################################
+# Main differential expression call #
+#####################################
 
 # Test for differential expression for -1 week versus -2 week
 multi.DE("pre1", 1, "pre2", -1, data = dgeglm.fit, design = design,
          group = group, adjpvalue = 0.05, method = "BH",
-         lrtdata = paste(method, ".dgelrt.pre1w", sep = ""),
          dedata = paste(method, ".de.pre1w", sep = ""),
          smearfile = paste(method, "_smear_pre1w", sep = ""))
 
 # Test for differential expression for 1 week versus -2 week and -1 week
 multi.DE(1, 1, "pre1", -1, "pre2", -1, data = dgeglm.fit, design = design,
          group = group, adjpvalue = 0.05, method = "BH",
-         lrtdata = paste(method, ".dgelrt.1w", sep = ""),
          dedata = paste(method, ".de.1w", sep = ""),
          smearfile = paste(method, "_smear_1w", sep = ""))
 
 # Test for differential expression for 2 week versus -2 week and -1 week
 multi.DE(2, 1, "pre1", -1, "pre2", -1, data = dgeglm.fit, design = design,
          group = group, adjpvalue = 0.05, method = "BH",
-         lrtdata = paste(method, ".dgelrt.2w", sep = ""),
          dedata = paste(method, ".de.2w", sep = ""),
          smearfile = paste(method, "_smear_2w", sep = ""))
 
 # Test for differential expression for 6 week versus -2 week and -1 week
 multi.DE(6, 1, "pre1", -1, "pre2", -1, data = dgeglm.fit, design = design,
          group = group, adjpvalue = 0.05, method = "BH",
-         lrtdata = paste(method, ".dgelrt.6w", sep = ""),
          dedata = paste(method, ".de.6w", sep = ""),
          smearfile = paste(method, "_smear_6w", sep = ""))
 
 # Test for differential expression for 10 week versus -2 week and -1 week
 multi.DE(10, 1, "pre1", -1, "pre2", -1, data = dgeglm.fit, design = design,
          group = group, adjpvalue = 0.05, method = "BH",
-         lrtdata = paste(method, ".dgelrt.10w", sep = ""),
          dedata = paste(method, ".de.10w", sep = ""),
          smearfile = paste(method, "_smear_10w", sep = ""))
 
 # Test for differential expression for 12 week versus -2 week and -1 week
 multi.DE(12, 1, "pre1", -1, "pre2", -1, data = dgeglm.fit, design = design,
          group = group, adjpvalue = 0.05, method = "BH",
-         lrtdata = paste(method, ".dgelrt.12w", sep = ""),
          dedata = paste(method, ".de.12w", sep = ""),
          smearfile = paste(method, "_smear_12w", sep = ""))
 
@@ -480,37 +480,29 @@ head(DEtable)
 write.matrix(x = DEtable, file = paste(method, "_full_DE.txt", sep = ""),
              sep = "\t")
 
+#####################################################
+# Plot the number of differentially expressed genes #
+#####################################################
+
+# Plot the number of differentially expressed genes per comparisons
+plot.numb.DE(data = DEtable,
+             comparison = c("1w", "2w", "6w", "10w", "12w"),
+             filename = paste(method, "_DE.tif", sep = ""))
+
 ##############################################
 # Comparison of DE genes between time points #
 ##############################################
 
 # Identify as a vector list the significant DE genes per time point
-sig.1w <- as.character(DEtable[!is.na(DEtable$FDR_1w) & (
-  DEtable$FDR_1w < 0.05), "gene_id"])
-sig.2w <- as.character(DEtable[!is.na(DEtable$FDR_2w) & (
-  DEtable$FDR_2w < 0.05), "gene_id"])
-sig.6w <- as.character(DEtable[!is.na(DEtable$FDR_6w) & (
-  DEtable$FDR_6w < 0.05), "gene_id"])
-sig.10w <- as.character(DEtable[!is.na(DEtable$FDR_10w) & (
-  DEtable$FDR_10w < 0.05), "gene_id"])
-sig.12w <- as.character(DEtable[!is.na(DEtable$FDR_12w) & (
-  DEtable$FDR_12w < 0.05), "gene_id"])
+venn.de(data = DEtable,
+        comparison = c("1w", "2w", "6w", "10w", "12w"),
+        picname = paste(method, "_Venn_All", sep = ""),
+        overlapname = paste(method, ".overlap", sep = ""),
+        lwd = 0.7, cex = 1, cat.cex = 1)
 
-# Define a set of colors
-colours <- brewer.pal(n = 5, name = "Set1")
-
-# Create the Venn diagram of overlapping DE genes between time points
-venn.diagram(x = list("1w" = sig.1w, "2w" = sig.2w, "6w" = sig.6w,
-                      "10w" = sig.10w, "12w" = sig.12w),
-             filename = paste(method, "_Venn_All.tiff", sep = ""),
-             na = "remove", res = 600, fill = colours, lwd = 0.7,
-             cex = 1, cat.cex = 1, cat.col = colours)
-
-# Identify the DE miRNA common to all post-infection time points
-overlap <- assign(x = paste(method, '.overlap', sep = ""),
-                  value = Reduce(intersect, list(
-                    sig.1w, sig.2w, sig.6w, sig.10w, sig.12w)))
-overlap
+# Create a variable containing the current overlap genes
+overlap <- eval(parse(text = paste(method, ".overlap", sep = "")))
+overlap <- grep(pattern = "_", x = overlap, value = TRUE, invert = TRUE)
 
 ##################################################
 # Clustering of samples based on common DE genes #
@@ -743,7 +735,8 @@ for (x in 1:nrow(Comp)) {
     concor.Pval <- (concor.Pval*100/length(Comp$gene_id))
   }
 }
-concordance["N.C.PCR-RNAseq"] <- list(list("logFC_concordance" = concor.fc, "Pvalue_concordance" = concor.Pval))
+concordance["N.C.PCR-RNAseq"] <- list(list(
+  "logFC_concordance" = concor.fc, "Pvalue_concordance" = concor.Pval))
 
 concor.fc <- 0
 concor.Pval <- 0
@@ -769,10 +762,65 @@ for (x in 1:nrow(Comp)) {
     concor.Pval <- (concor.Pval*100/length(Comp$gene_id))
   }
 }
-concordance["K.PCR-RNAseq"] <- list(list("logFC_concordance" = concor.fc, "Pvalue_concordance" = concor.Pval))
+concordance["K.PCR-RNAseq"] <- list(list(
+  "logFC_concordance" = concor.fc, "Pvalue_concordance" = concor.Pval))
 
 # Create a variable containing the current concordance results
 assign(paste(method, ".concordance", sep = ""), concordance)
+
+############################################
+# Additional differential expression calls #
+############################################
+
+# Perform all differential expression analysis within a for loop
+time <- c("pre2", "pre1", 1, 2, 6, 10, 12)
+for (i in time) {
+  print("Performing comparison versus:")
+  print(i)
+  DEtable.name <- c()
+  for (j in 1:length(time)) {
+    if (time[j] != i) {
+      # Test for differential expression for comparison
+      name <- paste(time[j], "wvs", i, "w", sep = "")
+      DEtable.name <- c(DEtable.name, name)
+      multi.DE(time[j], 1, i, -1, data = dgeglm.fit, design = design,
+               group = group, adjpvalue = 0.05, method = "BH",
+               dedata = paste(method, ".de.", name, sep = ""))
+    }
+    else {
+      next
+    }
+  }
+  # Merge all DE call data from the different time points
+  # Create a vector of DE table to merge
+  DEtable.method <- DEtable.name %>% lapply(X = ., FUN = function(x) paste(
+    method, "de", x, sep = '.')) %>% unlist(.)
+  # Merge all DE table for the different time points into a single dataframe
+  DEtable.merge(DEtable.method, output = paste(method, ".DE.vs", i, "w",
+                                             sep = ""),
+                pattern = paste("^", method, '.de.', sep = ""))
+  # Create a variable containing the current DEtable
+  DEtable <- eval(parse(text = paste(method, ".DE.vs", i, "w", sep = "")),
+                  envir = .GlobalEnv)
+  colnames(DEtable)
+  # Write into a table the full DE call data
+  write.matrix(x = DEtable, file = paste(method, "_DE_vs", i, "w.txt",
+                                         sep = ""),
+               sep = "\t")
+  # Plot the number of differentially expressed genes per comparisons
+  plot.numb.DE(data = DEtable,
+               comparison = DEtable.name,
+               pattern = "vs", replace = " vs ",
+               filename = paste(method, "_DE_vs", i, "w.tif", sep = ""))
+  # Comparison of DE genes between time points
+  # Identify as a vector list the significant DE genes per time point
+  venn.de(data = DEtable,
+          comparison = DEtable.name[-1],
+          pattern = "vs", replace = " vs ",
+          picname = paste(method, "_Venn_vs", i, "w", sep = ""),
+          overlapname = paste(method, ".overlap.vs", i, "w", sep = ""),
+          lwd = 0.7, cex = 1, cat.cex = 1)
+}
 
 ############################
 # Clean up the R workspace #
@@ -784,10 +832,13 @@ rm(CPM, Comp, Count, DEtable, MDS.ggplot, PCR.Kirsten, RT.qPCR, count.log2,
    rf.ImportanceOrdered, target, tmp, DEtable.name, MDS, animal, col.side, dat,
    colors, colours, concor.Pval, concor.fc, concordance, cor.gene, counter,
    dat1, dat2, dgeglm.fit, dgelist, dgelist.disp, dgelist.filt, dgelist.norm,
-   g, group, hist_plot, i, method, my.palette, n, overlap, pat, pattern.id,
-   pattern.time, pheno, res, rf, sig.10w, sig.12w, sig.1w, sig.2w, sig.6w,
-   time, user, val, x, DESeq.merge, DEtable.merge, diff_expr_edgeR, g.legend,
-   loadpackage, miR.DE, multi.DE, multi.MDS, sig_label, sample, files)
+   g, group, hist_plot, method, my.palette, n, overlap, pat, pattern.id,
+   pattern.time, pheno, res, rf, time, user, val, x, DESeq.merge,
+   DEtable.merge, diff_expr_edgeR, g.legend, loadpackage, miR.DE, multi.DE,
+   multi.MDS, sig_label, sample, files, plot.numb.DE, venn.de, name, j, i,
+   DEtable.method)
+rm(list = ls(pattern = ".*\\.de\\..*vs.*w"))
+rm(list = ls(pattern = ".*\\.overlap\\.vs.*w"))
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -796,11 +847,15 @@ rm(CPM, Comp, Count, DEtable, MDS.ggplot, PCR.Kirsten, RT.qPCR, count.log2,
 # Comparison of time overlapping DE genes between various analysis pipelines #
 ##############################################################################
 
+# Define a set of colors
+colours <- brewer.pal(n = 3, name = "Set1")
+
 # Create the Venn diagram of overlapping DE genes between time points
 venn.diagram(x = list("Novoalign" = Novoalign.overlap,
                       "miRdeep2" = miRdeep2.overlap,
                       "miRdeepstar" = miRdeepstar.overlap),
-             filename = "Venn_3pipelines.tiff", na="remove")
+             filename = "Venn_3pipelines.tiff", na="remove",
+             res = 600, fill = colours, cat.col = colours)
 
 # Get all the gene expression information for the candidate biomarkers miRNA
 biomarker <- merge(x = miRNA.info[(miRNA.info$gene_id %in% unique(c(
@@ -826,7 +881,7 @@ colnames(biomarker) %<>% gsub(pattern = "w$", replacement = "_miRdeepstar",
 write.matrix(x = biomarker, file = "Candidate_biomarkers.txt", sep = "\t")
 
 # Remove the temporary variables
-rm(miRNA.info, biomarker)
+rm(miRNA.info, biomarker, colours)
 
 #######
 # END #
