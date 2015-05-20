@@ -1,0 +1,157 @@
+##############################################################
+##############################################################
+##                                                          ##
+##  Serum miRNA-seq: Sequencing depth requirement Pipeline  ##
+##                                                          ##
+##############################################################
+##############################################################
+
+#######################################
+# Subsampling of original FASTQ files #
+#######################################
+
+# Create the sequencing depth analysis directory
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/fastq_tmp
+cd !$
+
+# Create shell script to uncompress original filtered FASTQ files
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/fastq_sequence/*.fastq.gz`; do outfile=`basename $file | perl -p -e 's/\.gz$//'`; echo "gunzip -c $file > $HOME/scratch/miRNAseqTimeCourse/Seq_depth/fastq_tmp/`basename $outfile`" >> uncompress.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 4 uncompress.sh uncompress.sh.
+for script in `ls uncompress.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Create and enter the subsampling directory
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/subsample
+cd !$
+
+# Write shell script to create several subsample from original FASTQ files
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/Seq_depth/fastq_tmp/*.fastq`
+do
+input=`echo $file`
+animal=`basename $file | perl -p -e 's/(\d{4}).*/$1/'`
+for num_sample in {1..12..1}
+do
+outfile=`basename $file | perl -p -e 's/\.fastq$//'`
+echo "fastq-sample -n 500000 -o ${outfile}_r${num_sample} --complement-output ${outfile}_r${num_sample}.remain $input" >> ${animal}_subsample.sh
+input=`echo ${outfile}_r${num_sample}.remain.fastq`
+done
+done
+
+# Run all scripts on Stampede
+for script in `ls *_subsample.sh`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Remove all the non necessary remainder reads in FASTQ files
+for file in `ls *.remain.fastq`; do rm -f $file; done;
+
+# Write a shell script to create several FASTQ file with increasing amount of reads
+for num in {1..11..1}
+do
+next_num=$(($num + 1))
+num_reads=$(($num * 500000))
+next_num_reads=$(($next_num * 500000))
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/Seq_depth/fastq_tmp/*.fastq`
+do
+input=`basename $file | perl -p -e 's/\.fastq$//'`
+animal=`basename $file | perl -p -e 's/(\d{4}).*/$1/'`
+if [ $num == 1 ]
+then
+echo "mv ${input}_r${num}.fastq ${input}_${num_reads}.fastq" >> ${animal}_sample.sh
+echo echo "\`basename ${input}_${num_reads}.fastq\` \`grep '@HWI-' ${input}_${num_reads}.fastq | wc -l\` >> ${animal}_read_count.txt" >> ${animal}_sample.sh
+fi
+echo "cat ${input}_${num_reads}.fastq ${input}_r${next_num}.fastq > ${input}_${next_num_reads}.fastq" >> ${animal}_sample.sh
+echo echo "\`basename ${input}_${next_num_reads}.fastq\` \`grep '@HWI-' ${input}_${next_num_reads}.fastq | wc -l\` >> ${animal}_read_count.txt" >> ${animal}_sample.sh
+done
+done
+
+# Run all scripts on Stampede
+for script in `ls *_sample.sh`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Remove all the non necessary subsample reads in FASTQ files
+for file in `ls *_trim_r*.fastq`; do rm -f $file; done;
+
+
+#############################################
+# Analysis of miRNA-seq data using miRdeep2 #
+#############################################
+
+# Required software is miRdeep2, consult manual/tutorial for details: https://www.mdc-berlin.de/36105849/en/research/research_teams/systems_biology_of_gene_regulatory_elements/projects/miRDeep/documentation
+
+# The Index reference genome can be found at /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/bowtie1.1.0
+
+# Create and enter the miRdeep2 directory for mapping work
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mapper
+cd !$
+
+# Create a shell script to process and map reads to the genome
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/Seq_depth/subsample/*.fastq`; do ln -s $file $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mapper/`basename $file`; done;
+for file in `ls *.fastq`; do outfile=`basename $file | perl -p -e 's/_trim(_\d+)\.fastq/$1/'`; echo "mapper.pl $file -e -h -m -p /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/bowtie1.1.0/Btau_UMD3.1_multi -s ${outfile}_collapsed.fa -t ${outfile}.arf -v" >> mapper.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 42 mapper.sh mapper.sh.
+for script in `ls mapper.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Create and enter the miRdeep2 directory for quantifying work
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/quantifier
+cd !$
+
+# Create a shell script to fast quantitate the mapped reads to known miRNA
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mapper/*_collapsed.fa`; do outfile=`basename $file | perl -p -e 's/_collapsed.fa//'`; echo "mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/quantifier/$outfile; cd $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/quantifier/$outfile; quantifier.pl -p /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_pre-miRNA.fa -m /workspace/storage/genomes/bostaurus/UMD3.1_NCBI/annotation_file/Btau_mature-miRNA.fa -r $file -t bta" >> quantifier.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 42 quantifier.sh quantifier.sh.
+for script in `ls quantifier.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Create and enter the miRdeep2 directory for miRdeep discovery work
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep
+cd !$
+
+# Copy the modified fasta files (miRdeep2 software requires no space in headers) to working directory 
+cp $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_UMD3.1_multi.fa ./Btau_UMD3.1_multi.fa
+cp $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_mature-miRNA.fa ./Btau_mature-miRNA.fa
+cp $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Other_mature-miRNA.fa ./Other_mature-miRNA.fa
+cp $HOME/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/Btau_pre-miRNA.fa ./Btau_pre-miRNA.fa
+
+# Create a shell script for identification and quantification of known and novel miRNAs
+for file in `ls $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mapper/*_collapsed.fa`; do outfile=`basename $file | perl -p -e 's/_collapsed.fa//'`; echo "mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep/$outfile; cd $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep/$outfile; miRDeep2.pl $file $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep/Btau_UMD3.1_multi.fa $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mapper/${outfile}.arf $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep/Btau_mature-miRNA.fa $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep/Other_mature-miRNA.fa $HOME/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep/Btau_pre-miRNA.fa -t Cow" >> miRdeep2.sh; done;
+
+# Split and run all scripts on Stampede
+split -d -l 42 miRdeep2.sh miRdeep2.sh.
+for script in `ls miRdeep2.sh.*`
+do
+chmod 755 $script
+nohup ./$script > ${script}.nohup &
+done
+
+# Process miRDeep2 output files to collect all isoforms read counts files (from the subsample analysis and the full sample analysis) for transfer on desktop computer
+mkdir -p $HOME/scratch/miRNAseqTimeCourse/Seq_depth/isomiR_counts/
+cd !$
+for file in `find /home/nnalpas/scratch/miRNAseqTimeCourse/Seq_depth/mirdeep2/mirdeep/ -name "miRBase.mrd"`; do outfile=`echo $file | perl -p -e 's/^.*\/mirdeep\/(\d+_.*?_\d+)\/.*$/$1_isomiR.txt/'`; echo "perl $HOME/Scripts/Get_isomiR_count.pl -mrd $file -output $HOME/scratch/miRNAseqTimeCourse/Seq_depth/isomiR_counts/$outfile" >> isomiR_summarisation.sh; done;
+for file in `find /home/nnalpas/scratch/miRNAseqTimeCourse/mirdeep2/mirdeep/ -name "miRBase.mrd"`; do outfile=`echo $file | perl -p -e 's/^.*\/mirdeep\/(\d+_.*?)\/.*$/$1_full_isomiR.txt/'`; echo "perl $HOME/Scripts/Get_isomiR_count.pl -mrd $file -output $HOME/scratch/miRNAseqTimeCourse/Seq_depth/isomiR_counts/$outfile" >> isomiR_summarisation.sh; done;
+
+# Run the script on Stampede
+chmod 755 isomiR_summarisation.sh
+nohup ./isomiR_summarisation.sh &
+
+# Perform subsequent miRNA analyses in R, follow R pipelines
+
