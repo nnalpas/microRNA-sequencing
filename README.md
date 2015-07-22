@@ -13,7 +13,7 @@ Further README files may be added for each scripts at later date, in order to fa
 For any inquirements concerning our article or repository, please contact:
 
 Nalpas, N.C.
-nicolas.nalpas@ucd.ie
+nicolas.nalpas@gmail.com
 
 or
 
